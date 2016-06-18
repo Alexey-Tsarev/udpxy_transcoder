@@ -1,9 +1,14 @@
 <?php
+
+// interesting only GET
+if (getenv('REQUEST_METHOD') != 'GET')
+    die;
+
 //config file
 require_once('conf.php');
 
 /*
- * GET parameters / functionality
+ * GET parameters                      - functionality
  * source                              - get m3u8 playlist
  * source, feed_name, [preset]         - get m3u8 playlist (transcode)
  * source, feed_name, stream, [preset] - get transcode stream
@@ -64,8 +69,11 @@ if ($cfg_source) {
             if (isset($preset_array[$GET_preset])) {
                 $preset = $preset_array[$GET_preset];
 
-                $stream_url = str_replace('feed_name', $GET_feed_name, $stream_url);
                 $kill_feed_mask = str_replace('feed_name', $GET_feed_name, $kill_feed_mask);
+
+                $GET_feed_name .= '/' . $GET_stream . '/' . date('Y-m-d_H-i-s') . substr(explode(' ', microtime())[0], 1);
+
+                $stream_url = str_replace('feed_name', $GET_feed_name, $stream_url);
 
                 $restream_cmd = str_replace('PULL_URL ', $cfg_proxy_server_url, $restream_cmd);
                 $restream_cmd = str_replace('STREAM', $GET_stream, $restream_cmd);
@@ -83,10 +91,14 @@ if ($cfg_source) {
                     $restream_cmd_add = ' > /dev/null 2>&1';
                 }
 
-                exec('pkill -f ' . $kill_feed_mask);
                 exec('nohup ' . $restream_cmd . $restream_cmd_add . ' & echo $!', $out);
 
                 if (isset($out)) {
+
+                    $pid = $out[0];
+
+                    if ($debug)
+                        l($pid);
 
                     usleep($poller_interval);
 
@@ -119,14 +131,40 @@ if ($cfg_source) {
                     }
 
                     if ($status_code == 200) {
+
                         $redirect_header = 'Location: ' . $stream_url;
 
-                        if ($debug)
-                            l($redirect_header); else
+                        if ($debug) {
+                            l($redirect_header);
+                        } else {
                             header($redirect_header);
+                            flush();
+                        }
+
+                        // kill other processes
+                        if (isset($out))
+                            unset($out);
+
+                        exec('pgrep -f ' . $kill_feed_mask, $out);
+
+                        if (isset($out)) {
+                            for ($i = 0; $i < count($out); $i++) {
+
+                                if ($out[$i] == $pid) {
+                                    if ($debug)
+                                        l($out[$i] . ' - skip');
+                                } else {
+                                    exec('kill ' . $out[$i]);
+
+                                    if ($debug)
+                                        l($out[$i] . ' - killed');
+                                }
+                            }
+                        }
+                        // end
                     }
 
-                    die();
+                    die;
                 }
             } else {
                 final_text_print('Preset not found');
